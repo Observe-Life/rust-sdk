@@ -134,6 +134,21 @@ pub trait SessionManager: Send + Sync + 'static {
         Output = Result<impl Stream<Item = ServerSseMessage> + Send + Sync + 'static, Self::Error>,
     > + Send;
 
+    /// Return `true` when `err` means the session is gone: unknown, or its
+    /// service has terminated.
+    ///
+    /// The MCP Streamable HTTP spec requires a request carrying an
+    /// `Mcp-Session-Id` for such a session to be answered with `404 Not Found`,
+    /// so the client starts a new session by sending a fresh `initialize`.
+    /// Implementations must return `true` only for that condition; unrelated
+    /// internal failures keep their `500` response.
+    ///
+    /// Defaults to `false` so third-party session managers keep the previous
+    /// behaviour until they opt in.
+    fn session_gone(_err: &Self::Error) -> bool {
+        false
+    }
+
     /// Attempt to restore a previously-known session from external state,
     /// creating a fresh in-memory session worker with the given `id`.
     ///
