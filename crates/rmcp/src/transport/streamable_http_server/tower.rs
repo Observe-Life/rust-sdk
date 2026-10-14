@@ -318,6 +318,26 @@ fn origin_is_allowed(origin: &NormalizedOrigin, allowed_origins: &[String]) -> b
         })
 }
 
+/// MCP Streamable HTTP spec: a request that carries an `Mcp-Session-Id` for a
+/// session that is unknown or whose service has terminated MUST be answered
+/// with `404 Not Found`, so the client starts a new session by re-initializing.
+///
+/// Every other failure keeps the generic `500 Internal Server Error` response;
+/// only [`SessionManager::session_gone`] decides which is which.
+fn session_error_response<M: SessionManager>(context: &'static str, err: M::Error) -> BoxResponse {
+    if M::session_gone(&err) {
+        tracing::debug!(
+            error = %err,
+            "session is gone; responding 404 Not Found so the client re-initializes"
+        );
+        return Response::builder()
+            .status(http::StatusCode::NOT_FOUND)
+            .body(Full::new(Bytes::from("Not Found: Session not found")).boxed())
+            .expect("valid response");
+    }
+    internal_error_response(context)(err)
+}
+
 fn bad_request_response(message: &str) -> BoxResponse {
     let body = Full::from(message.to_string()).boxed();
 
@@ -941,7 +961,7 @@ where
             .session_manager
             .create_standalone_stream(&session_id)
             .await
-            .map_err(internal_error_response("create standalone stream"))?;
+            .map_err(|e| session_error_response::<M>("create standalone stream", e))?;
         let stream = if let Some(retry) = self.config.sse_retry {
             let priming = ServerSseMessage::priming("0", retry);
             futures::stream::once(async move { priming })
@@ -1055,7 +1075,7 @@ where
                             .session_manager
                             .create_stream(&session_id, message)
                             .await
-                            .map_err(internal_error_response("get session"))?;
+                            .map_err(|e| session_error_response::<M>("get session", e))?;
                         Ok(sse_stream_response(
                             stream,
                             self.config.sse_keep_alive,
@@ -1069,7 +1089,7 @@ where
                         self.session_manager
                             .accept_message(&session_id, message)
                             .await
-                            .map_err(internal_error_response("accept message"))?;
+                            .map_err(|e| session_error_response::<M>("accept message", e))?;
                         Ok(accepted_response())
                     }
                 }
