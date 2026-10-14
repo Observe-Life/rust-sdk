@@ -83,6 +83,16 @@ impl SessionManager for LocalSessionManager {
         let sessions = self.sessions.read().await;
         Ok(sessions.contains_key(id))
     }
+
+    fn session_gone(err: &Self::Error) -> bool {
+        match err {
+            LocalSessionManagerError::SessionNotFound(_) => true,
+            LocalSessionManagerError::SessionError(err) => {
+                matches!(err, SessionError::SessionServiceTerminated)
+            }
+            LocalSessionManagerError::InvalidEventId(_) => false,
+        }
+    }
     async fn create_stream(
         &self,
         id: &SessionId,
